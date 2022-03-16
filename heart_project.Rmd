@@ -1,0 +1,487 @@
+```{r}
+library(dplyr)
+library(tidyverse)
+library(caret)
+```
+## Load Data
+```{r}
+heart = read.csv("heart.csv")
+
+# Replace Cholesterol == 0 with mean value
+mean_cho = as.numeric(heart %>% 
+  dplyr::select(Cholesterol) %>%
+  filter(Cholesterol != 0) %>%
+  summarise(mean = mean(Cholesterol)))
+
+heart_1 =
+  heart %>% 
+  filter(Cholesterol != 0) 
+
+heart_0 =
+  heart%>% 
+  filter(Cholesterol == 0) %>%
+  mutate(Cholesterol = mean_cho)
+
+heart = rbind(heart_1, heart_0)
+
+heart_f = heart %>%
+  filter(Sex == "F")
+
+heart_m = heart %>%
+  filter(Sex == "M")
+  
+final_heart = rbind(heart_m, heart_f, heart_f, heart_f, heart_f)
+
+# One RestingBP is 0, we simply removed that one instance.
+final_heart = final_heart %>%
+  filter(RestingBP != 0) %>%
+  mutate(Sex = case_when(
+    Sex == "M" ~ 0,
+    Sex == "F" ~ 1
+  )) %>%
+  mutate(ExerciseAngina = case_when(
+    ExerciseAngina == "N" ~ 0,
+    ExerciseAngina == "Y" ~ 1
+  )) %>%
+  mutate(RestingECG = case_when(
+    RestingECG == "Normal" ~ 0,
+    RestingECG != "Normal" ~ 1
+  ))
+
+final_heart
+
+fenghe2 = final_heart %>%
+  dplyr::select(-c("ST_Slope", "ChestPainType"))
+
+```
+
+```{r}
+fenghe1 = final_heart[c("ChestPainType", "ST_Slope")]
+dummy = dummyVars(" ~ .", data=fenghe1)
+fenghe1_new = data.frame(predict(dummy, newdata = fenghe1))
+
+final_df = cbind(fenghe1_new, fenghe2)
+final_df
+
+lm_1 = lm(HeartDisease ~ ChestPainTypeASY +
+             ChestPainTypeATA +
+             ChestPainTypeNAP +
+             ChestPainTypeTA +
+             ST_SlopeDown +
+             ST_SlopeFlat +
+             ST_SlopeUp +
+             Age +
+             Sex +
+             RestingBP + Cholesterol + FastingBS + RestingECG + MaxHR + ExerciseAngina + Oldpeak, data = final_df)
+
+summary(lm_1)
+sum(lm_1$resid)
+```
+## Simple lm model
+
+```{r}
+
+lm2_1 = lm(HeartDisease ~ ChestPainTypeASY +
+             ST_SlopeDown +
+             ST_SlopeFlat +
+             Sex +
+             RestingBP + FastingBS+ ExerciseAngina + Oldpeak, data = final_df, family="binomial")
+
+summary(lm2_1)
+```
+
+**anova for simple lm**
+```{r}
+anova(lm2_1,lm_1)
+```
+
+##Leave-one-out cross-validation
+
+
+```{r}
+nrows = nrow(final_df)
+norder = 5
+
+errors = data.frame( 'Row'=rep(1:nrows, each=norder),
+                     'Order'=rep(1:norder, times=nrows),
+                                 'Error'=rep(NA, nrows*norder));
+
+for ( i in 1:nrow(final_df) ) {
+  train_data = final_df[-c(i),];
+  leftout = final_df[c(i),];
+  
+  m1 = glm(HeartDisease ~ 1 + ChestPainTypeASY +
+             ST_SlopeDown +
+             ST_SlopeFlat +
+             RestingBP + Oldpeak, train_data, family="binomial");
+  m1.pred = predict( m1, leftout );
+  idx = (errors$Row==i & errors$Order==1)
+  errors[idx,]$Error = (m1.pred - leftout$HeartDisease)^2 
+  
+  #  quadratic model
+  m2 = glm(HeartDisease ~ 1 + ChestPainTypeASY +
+             ST_SlopeDown +
+             ST_SlopeFlat +
+             RestingBP + Oldpeak+
+             I(ChestPainTypeASY^2) +
+             I(ST_SlopeDown^2) +
+             I(ST_SlopeFlat^2) +
+             I(RestingBP^2) + I(Oldpeak^2), train_data, family="binomial" )
+  m2.pred = predict( m2, leftout )
+  idx = (errors$Row==i & errors$Order==2)
+  
+  errors[idx,]$Error = (m2.pred - leftout$HeartDisease)^2; 
+
+  #  cubic model
+  m3 = glm(HeartDisease ~ 1 + ChestPainTypeASY +
+             ST_SlopeDown +
+             ST_SlopeFlat +
+             RestingBP + Oldpeak+
+             I(ChestPainTypeASY^2) +
+             I(ST_SlopeDown^2) +
+             I(ST_SlopeFlat^2) +
+             I(RestingBP^2) + I(Oldpeak^2)+
+             I(ChestPainTypeASY^3) +
+             I(ST_SlopeDown^3) +
+             I(ST_SlopeFlat^3) +
+             I(RestingBP^3) + I(Oldpeak^3), train_data, family="binomial" );
+ m3.pred = predict( m3, leftout );
+  idx = (errors$Row==i & errors$Order==3);
+ 
+  errors[idx,]$Error = (m3.pred - leftout$HeartDisease)^2; 
+  
+  #  4-th order model
+  m4 = glm(HeartDisease ~ 1 + ChestPainTypeASY +
+             ST_SlopeDown +
+             ST_SlopeFlat +
+             RestingBP + Oldpeak+
+             I(ChestPainTypeASY^2) +
+             I(ST_SlopeDown^2) +
+             I(ST_SlopeFlat^2) +
+             I(RestingBP^2) + I(Oldpeak^2)+
+             I(ChestPainTypeASY^3) +
+             I(ST_SlopeDown^3) +
+             I(ST_SlopeFlat^3) +
+             I(RestingBP^3) + I(Oldpeak^3)+
+             I(ChestPainTypeASY^4) +
+             I(ST_SlopeDown^4) +
+             I(ST_SlopeFlat^4) +
+             I(RestingBP^4) + I(Oldpeak^4), train_data, family="binomial" );
+ m4.pred = predict( m4, leftout );
+  idx = (errors$Row==i & errors$Order==4);
+  errors[idx,]$Error = (m4.pred - leftout$HeartDisease)^2; 
+}
+
+
+
+err_agg = aggregate(Error ~ Order, data=errors, FUN=mean);
+
+head(err_agg)
+```
+
+
+```{r}
+pp = ggplot(err_agg, aes(x=Order, y=log(Error) ) );
+pp = pp + geom_line( size=1)
+pp
+```
+
+
+```{r}
+anov = anova(m1,m2,m3,m4)
+anov
+```
+
+```{r}
+nrow(final_df)
+final_df[c(1:5),]
+```
+
+
+```{r}
+k = 5
+n_row = nrow(final_df)
+kfolds = split(sample(1:n_row, n_row,replace=FALSE), as.factor(1:k))
+
+```
+
+```{r}
+mtcars_fit_models =  function( holdout_idxs ) {
+  
+  # Split the mtcars data into train and the hold-out.
+  train_data =  final_df[ -holdout_idxs, ];
+  leftout =  final_df[ holdout_idxs, ];
+  
+  errors  =  rep( NA, 5 ); # We're training up to order 5.
+  
+  # Fit the linear model, then evaluate.
+  ma = lm(HeartDisease ~ 1 + ChestPainTypeASY, train_data );
+  ma.pred = predict( ma, leftout );
+  errors[1] = mean( (ma.pred - leftout$HeartDisease)^2 ); 
+  
+  # Fit the quadratic model, then evaluate.
+  mb = lm(HeartDisease ~ 1 + ChestPainTypeASY + I(ChestPainTypeASY^2), train_data );
+  mb.pred = predict( mb, leftout );
+  errors[2] = mean( (mb.pred - leftout$HeartDisease)^2 ); 
+
+  # Fit the cubic model, then evaluate.
+  mc = lm(HeartDisease ~ 1 + ChestPainTypeASY + I(ChestPainTypeASY^2) + I(ChestPainTypeASY^3), train_data );
+  mc.pred = predict( mc, leftout );
+  errors[3] = mean( (mc.pred - leftout$HeartDisease)^2 ); 
+  
+  # Fit the 4-th order model, then evaluate.
+  md = lm(HeartDisease ~ 1 + ChestPainTypeASY + I(ChestPainTypeASY^2) + I(ChestPainTypeASY^3) + I(ChestPainTypeASY^4), train_data );
+  md.pred = predict( md, leftout );
+  errors[4] = mean( (md.pred - leftout$HeartDisease)^2 ); 
+  
+  # Fit the 5-th order model, then evaluate.
+  me = lm(HeartDisease ~ 1 + ChestPainTypeASY + I(ChestPainTypeASY^2) + I(ChestPainTypeASY^3) + I(ChestPainTypeASY^4) + I(ChestPainTypeASY^5), train_data );
+  me.pred = predict( me, leftout );
+  errors[5] = mean( (me.pred - leftout$HeartDisease)^2 ); 
+  
+  return( errors );
+}
+```
+
+## k_fold
+```{r}
+
+norder = 5;
+Kfold_resids = data.frame( 'Order'=rep(1:norder, each=k),
+                            'Fold'=rep(1:k, norder ),
+                            'Error'=rep(NA, k*norder) );
+
+for (i in 1:k ) {
+  heldout_idxs = kfolds[[i]];
+  idx = (Kfold_resids$Fold==i);
+  Kfold_resids[idx, ]$Error = mtcars_fit_models( heldout_idxs );
+  
+}
+
+head(Kfold_resids)
+```
+
+##Finding the best PCA model for each gender
+
+**Male**
+```{r}
+male = final_df%>%
+  filter(Sex == "0")%>%
+  dplyr::select(-Sex)
+
+male
+
+lm_male = lm(HeartDisease~., male)
+summary(lm_male)
+sum(lm_male$residuals)
+
+```
+```{r}
+adjusted_male = lm(HeartDisease~ChestPainTypeASY+ST_SlopeDown+ST_SlopeFlat+FastingBS+MaxHR+ExerciseAngina+Oldpeak,male)
+summary(adjusted_male)
+sum(adjusted_male$residuals)
+```
+(after dropping the insiginficant variables, the model becomes worse.)
+
+
+```{r}
+PCA_male = prcomp(male, scale = TRUE)
+summary(PCA_male)
+biplot(PCA_male)
+```
+```{r}
+#pc3
+PCA_3_df = data.frame(
+  disease = male$HeartDisease,
+  PC1 = PCA_male$x[,1],
+  PC2 = PCA_male$x[,2],
+  PC3 = PCA_male$x[,3]
+)
+
+model_3_pc <- train(disease ~ PC1 + PC2 + PC3, 
+                            data = PCA_3_df, 
+                            method = "lm",
+                            trControl = trainControl(method = "cv", number = 50))
+
+model_3_pc
+```
+```{r}
+PCA_4_df = data.frame(
+  disease = male$HeartDisease,
+  PC1 = PCA_male$x[,1],
+  PC2 = PCA_male$x[,2],
+  PC3 = PCA_male$x[,3],
+  PC4 = PCA_male$x[,4]
+)
+
+model_4_pc <- train(disease ~ PC1 + PC2 + PC3 + PC4,
+                            data = PCA_4_df, 
+                            method = "lm",
+                            trControl = trainControl(method = "cv", number = 50))
+
+model_4_pc
+```
+```{r}
+PCA_5_df = data.frame(
+  disease = male$HeartDisease,
+  PC1 = PCA_male$x[,1],
+  PC2 = PCA_male$x[,2],
+  PC3 = PCA_male$x[,3],
+  PC4 = PCA_male$x[,4],
+  PC5 = PCA_male$x[,5]
+)
+
+model_5_pc <- train(disease ~ PC1 + PC2 + PC3 + PC4+PC5,
+                            data = PCA_5_df, 
+                            method = "lm",
+                            trControl = trainControl(method = "cv", number = 50))
+
+model_5_pc
+```
+```{r}
+PCA_6_df = data.frame(
+  disease = male$HeartDisease,
+  PC1 = PCA_male$x[,1],
+  PC2 = PCA_male$x[,2],
+  PC3 = PCA_male$x[,3],
+  PC4 = PCA_male$x[,4],
+  PC5 = PCA_male$x[,5],
+  PC6 = PCA_male$x[,6]
+)
+
+model_6_pc <- train(disease ~ PC1 + PC2 + PC3 + PC4 + PC5 + PC6 ,
+                            data = PCA_6_df, 
+                            method = "lm",
+                            trControl = trainControl(method = "cv", number = 50))
+```
+
+**anova test**
+```{r}
+model_6_pc
+model6 = lm(disease~., PCA_6_df)
+summary(model6)
+model5 = lm(disease~.,PCA_5_df)
+summary(model5)
+anovatest = anova(model6,model5)
+summary(anovatest)
+```
+
+
+
+
+**ridge regression coef**
+```{r}
+library(MASS)
+lambda_val = c(0,1,2,5,10,20,50)
+MASS::select(lm.ridge(disease ~ PC1 + PC2 + PC3 + PC4 + PC5 + PC6, 
+                            data = PCA_6_df, 
+                lambda = c(0,1,2,5,10,20,50)))
+longley.RReg = lm.ridge(disease ~ PC1 + PC2 + PC3 + PC4 + PC5 + PC6, 
+                            data = PCA_6_df, lambda = lambda_val)
+coef(longley.RReg)
+plot(longley.RReg)
+```
+**female**
+```{r}
+female = final_df%>%
+  filter(Sex == "1")%>%
+  dplyr::select(-Sex)
+
+female
+```
+
+
+```{r}
+PCA_female = prcomp(female, scale = TRUE)
+summary(PCA_female)
+biplot(PCA_female)
+```
+
+```{r}
+#pc3
+PCA_3_fedf = data.frame(
+  fdisease = female$HeartDisease,
+  PC1 = PCA_female$x[,1],
+  PC2 = PCA_female$x[,2],
+  PC3 = PCA_female$x[,3]
+)
+
+fe_model_3_pc <- train(fdisease ~ PC1 + PC2 + PC3, 
+                            data = PCA_3_fedf, 
+                            method = "lm",
+                            trControl = trainControl(method = "cv", number = 50))
+
+fe_model_3_pc
+```
+
+```{r}
+PCA_4_fedf = data.frame(
+  fdisease = female$HeartDisease,
+  PC1 = PCA_female$x[,1],
+  PC2 = PCA_female$x[,2],
+  PC3 = PCA_female$x[,3],
+  PC4 = PCA_female$x[,4]
+)
+
+fe_model_4_pc <- train(fdisease ~ PC1 + PC2 + PC3 + PC4, 
+                            data = PCA_4_fedf, 
+                            method = "lm",
+                            trControl = trainControl(method = "cv", number = 50))
+
+fe_model_4_pc
+```
+
+
+
+```{r}
+PCA_5_fedf = data.frame(
+  fdisease = female$HeartDisease,
+  PC1 = PCA_female$x[,1],
+  PC2 = PCA_female$x[,2],
+  PC3 = PCA_female$x[,3],
+  PC4 = PCA_female$x[,4],
+  PC5 = PCA_female$x[,5]
+)
+
+fe_model_5_pc <- train(fdisease ~ PC1 + PC2 + PC3 + PC4 + PC5, 
+                            data = PCA_5_fedf, 
+                            method = "lm",
+                            trControl = trainControl(method = "cv", number = 50))
+
+fe_model_5_pc
+```
+
+
+**ridge regression coef**
+```{r}
+MASS::select(lm.ridge(fdisease ~ PC1 + PC2 + PC3 + PC4 + PC5 , 
+                            data = PCA_5_fedf, 
+                lambda = c(0,1,2,5,10,20,50)))
+
+ridge_female = lm.ridge(fdisease ~ PC1 + PC2 + PC3 + PC4 + PC5 , 
+                            data = PCA_5_fedf, lambda = lambda_val)
+coef(ridge_female)
+plot(ridge_female)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
